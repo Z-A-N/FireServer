@@ -2,11 +2,9 @@ import requests
 import random
 import time
 
-# URL endpoint dari server Railway kamu
-URL = "https://fireserver-production.up.railway.app/api/sensor"
+URL = "https://fireserver.up.railway.app/api/sensor"  # ✅ domain kamu
 
 while True:
-    # Simulasi nilai sensor (0–1023)
     sensor_1 = random.randint(100, 1000)
     sensor_2 = random.randint(100, 1000)
     sensor_3 = random.randint(100, 1000)
@@ -24,4 +22,4 @@ while True:
     except Exception as e:
         print(f"❌ Gagal kirim data: {e}")
 
-    time.sleep(5)  # kirim tiap 5 detik
+    time.sleep(5)
