@@ -21,17 +21,17 @@ def receive_sensor_data():
     try:
         data = request.get_json()
 
-        # Ambil data dari JSON
-        sensor_1 = float(data.get('sensor_1', 0))
-        sensor_2 = float(data.get('sensor_2', 0))
-        sensor_3 = float(data.get('sensor_3', 0))
+        # Ambil data dari JSON (digital 0/1)
+        sensor_1 = int(data.get('sensor_1', 1))
+        sensor_2 = int(data.get('sensor_2', 1))
+        sensor_3 = int(data.get('sensor_3', 1))
 
-        # Logika penentuan status dan alarm
-        if sensor_1 < 200 or sensor_2 < 200 or sensor_3 < 200:
-            status = "Kebakaran"
-            alarm = "ON"
-        elif sensor_1 < 500 or sensor_2 < 500 or sensor_3 < 500:
-            status = "Bahaya"
+        # Logika penentuan status dan alarm (digital logic)
+        if sensor_1 == 0 or sensor_2 == 0 or sensor_3 == 0:
+            if sensor_1 == 0 and sensor_2 == 0 and sensor_3 == 0:
+                status = "Kebakaran"
+            else:
+                status = "Bahaya"
             alarm = "ON"
         else:
             status = "Aman"
