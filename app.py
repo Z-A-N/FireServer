@@ -5,48 +5,45 @@ from db import get_db
 import os
 import datetime
 
-# Inisialisasi Flask
+# Inisialisasi Flask & SocketIO
 app = Flask(__name__)
 CORS(app)
-
-# Konfigurasi SocketIO agar stabil di Railway
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
-    async_mode='eventlet',          # Penting agar support WebSocket penuh
-    ping_interval=25,               # Kirim ping tiap 25 detik
-    ping_timeout=120,               # Timeout 2 menit
-    logger=True,                    # Tampilkan log koneksi
+    async_mode='eventlet',
+    ping_interval=25,
+    ping_timeout=120,
+    logger=True,
     engineio_logger=True
 )
 
-# Halaman utama (cek server)
+# Halaman utama
 @app.route('/')
 def home():
     return "🔥 FireServer aktif! Menunggu data dari 3 sensor api (WeMos D1 Mini)."
 
-# Endpoint untuk tes koneksi Flutter/HTTP
+# Tes koneksi
 @app.route('/api/ping', methods=['GET'])
 def ping():
+    print(f"[PING] Flutter/Web cek koneksi - {datetime.datetime.now()}")
     return jsonify({
         "status": "alive",
         "time": datetime.datetime.now().isoformat()
     })
 
-# Endpoint untuk menerima data dari WeMos
+# Terima data dari Wemos
 @app.route('/api/sensor', methods=['POST'])
 def receive_sensor_data():
     try:
         data = request.get_json()
+        s1 = int(data.get('sensor_1', 1))
+        s2 = int(data.get('sensor_2', 1))
+        s3 = int(data.get('sensor_3', 1))
 
-        # Ambil data dari JSON (digital 0/1)
-        sensor_1 = int(data.get('sensor_1', 1))
-        sensor_2 = int(data.get('sensor_2', 1))
-        sensor_3 = int(data.get('sensor_3', 1))
-
-        # Logika status dan alarm
-        if sensor_1 == 0 or sensor_2 == 0 or sensor_3 == 0:
-            if sensor_1 == 0 and sensor_2 == 0 and sensor_3 == 0:
+        # Logika status
+        if s1 == 0 or s2 == 0 or s3 == 0:
+            if s1 == 0 and s2 == 0 and s3 == 0:
                 status = "Kebakaran"
             else:
                 status = "Bahaya"
@@ -61,38 +58,35 @@ def receive_sensor_data():
         cursor.execute("""
             INSERT INTO flame_data (sensor_1, sensor_2, sensor_3, status, alarm)
             VALUES (%s, %s, %s, %s, %s)
-        """, (sensor_1, sensor_2, sensor_3, status, alarm))
+        """, (s1, s2, s3, status, alarm))
         db.commit()
         cursor.close()
         db.close()
 
-        # Payload realtime untuk Flutter
+        # Kirim ke Flutter
         payload = {
-            "sensor_1": sensor_1,
-            "sensor_2": sensor_2,
-            "sensor_3": sensor_3,
+            "sensor_1": s1,
+            "sensor_2": s2,
+            "sensor_3": s3,
             "status": status,
             "alarm": alarm,
             "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
-
-        # Broadcast ke Flutter via SocketIO
         socketio.emit('flame_update', payload)
 
-        print(f"🔥 Data diterima | S1={sensor_1}, S2={sensor_2}, S3={sensor_3} | Status={status} | Alarm={alarm}")
+        print(f"[DATA] S1={s1}, S2={s2}, S3={s3} | Status={status} | Alarm={alarm}")
         return jsonify({"status": "success", **payload}), 200
 
     except Exception as e:
-        print("❌ Error:", e)
+        print(f"[ERROR] {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-
-# Event saat Flutter connect ke SocketIO
+# Flutter connect ke server
 @socketio.on('connect')
-def client_connected():
-    print("📡 Flutter client tersambung ke SocketIO")
-
+def on_connect():
+    print(f"[CONNECT] Flutter client tersambung ke SocketIO ({datetime.datetime.now()})")
 
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
+    print(f"[START] FireServer berjalan di port {port}")
     socketio.run(app, host='0.0.0.0', port=port)
