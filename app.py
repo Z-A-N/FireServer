@@ -4,8 +4,13 @@ from flask_cors import CORS
 from db import get_db
 import os
 import datetime
+import logging
 
-# Inisialisasi Flask & SocketIO
+# 🔇 Biar log bawaan engineio/socketio nggak spam "emitting event..."
+logging.getLogger('engineio').setLevel(logging.ERROR)
+logging.getLogger('socketio').setLevel(logging.ERROR)
+
+# ⚙️ Inisialisasi Flask & SocketIO
 app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(
@@ -18,12 +23,12 @@ socketio = SocketIO(
     engineio_logger=True
 )
 
-# Halaman utama
+# 🏠 Halaman utama
 @app.route('/')
 def home():
     return "🔥 FireServer aktif! Menunggu data dari 3 sensor api (WeMos D1 Mini)."
 
-# Tes koneksi
+# 🔍 Endpoint tes koneksi
 @app.route('/api/ping', methods=['GET'])
 def ping():
     print(f"[PING] Flutter/Web cek koneksi - {datetime.datetime.now()}")
@@ -32,7 +37,7 @@ def ping():
         "time": datetime.datetime.now().isoformat()
     })
 
-# Terima data dari Wemos
+# 🔥 Endpoint untuk menerima data dari Wemos
 @app.route('/api/sensor', methods=['POST'])
 def receive_sensor_data():
     try:
@@ -41,7 +46,7 @@ def receive_sensor_data():
         s2 = int(data.get('sensor_2', 1))
         s3 = int(data.get('sensor_3', 1))
 
-        # Logika status
+        # Logika status & alarm
         if s1 == 0 or s2 == 0 or s3 == 0:
             if s1 == 0 and s2 == 0 and s3 == 0:
                 status = "Kebakaran"
@@ -63,7 +68,7 @@ def receive_sensor_data():
         cursor.close()
         db.close()
 
-        # Kirim ke Flutter
+        # Payload ke Flutter
         payload = {
             "sensor_1": s1,
             "sensor_2": s2,
@@ -72,20 +77,35 @@ def receive_sensor_data():
             "alarm": alarm,
             "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
+
+        # 🚀 Kirim data realtime
         socketio.emit('flame_update', payload)
 
-        print(f"🔥 Data diterima | S1={s1}, S2={s2}, S3={s3} | Status={status} | Alarm={alarm}")
+        # Hitung berapa client yang aktif di namespace "/"
+        connected_clients = 0
+        if hasattr(socketio.server.manager, 'rooms') and '/' in socketio.server.manager.rooms:
+            connected_clients = len(socketio.server.manager.rooms['/'])
+
+        print(f"[SEND] flame_update → dikirim ke {connected_clients} client ({datetime.datetime.now().strftime('%H:%M:%S')})")
+        print(f"[DATA] S1={s1}, S2={s2}, S3={s3} | Status={status} | Alarm={alarm}")
         return jsonify({"status": "success", **payload}), 200
 
     except Exception as e:
-        print(f"[❌ Error: {e}")
+        print(f"[❌ ERROR] {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# Flutter connect ke server
+
+# 📡 Saat Flutter connect
 @socketio.on('connect')
 def on_connect():
     print(f"[CONNECT] Flutter client tersambung ke SocketIO ({datetime.datetime.now()})")
 
+# ❌ Saat Flutter disconnect
+@socketio.on('disconnect')
+def on_disconnect():
+    print(f"[DISCONNECT] Flutter client terputus ({datetime.datetime.now()})")
+
+# ▶️ Run Server
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
     print(f"[START] FireServer berjalan di port {port}")
