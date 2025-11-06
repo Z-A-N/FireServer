@@ -74,11 +74,11 @@ def receive_sensor_data():
         }
         socketio.emit('flame_update', payload)
 
-        print(f"[DATA] S1={s1}, S2={s2}, S3={s3} | Status={status} | Alarm={alarm}")
+        print(f"🔥 Data diterima | S1={s1}, S2={s2}, S3={s3} | Status={status} | Alarm={alarm}")
         return jsonify({"status": "success", **payload}), 200
 
     except Exception as e:
-        print(f"[ERROR] {e}")
+        print(f"[❌ Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 # Flutter connect ke server
