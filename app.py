@@ -8,7 +8,7 @@ import datetime
 # Inisialisasi Flask & SocketIO
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 # 🏠 Route Utama
 @app.route('/')
