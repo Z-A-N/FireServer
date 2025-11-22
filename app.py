@@ -30,25 +30,40 @@ def receive_sensor_data():
     try:
         data = request.get_json()
 
-        sensor_1 = int(data.get('sensor_1', 1))
-        sensor_2 = int(data.get('sensor_2', 1))
-        sensor_3 = int(data.get('sensor_3', 1))
+        # RAW sensor values (ADC)
+        raw_1 = int(data.get('sensor_1', 1))
+        raw_2 = int(data.get('sensor_2', 1))
+        raw_3 = int(data.get('sensor_3', 1))
 
-        if sensor_1 == 0 or sensor_2 == 0 or sensor_3 == 0:
-            status = "Kebakaran" if (sensor_1 == 0 and sensor_2 == 0 and sensor_3 == 0) else "Bahaya"
+        # Threshold konversi RAW → BINARY
+        # Sesuaikan dengan karakteristik sensor IR kamu
+        TH = 100
+
+        sensor_1 = 0 if raw_1 <= TH else 1
+        sensor_2 = 0 if raw_2 <= TH else 1
+        sensor_3 = 0 if raw_3 <= TH else 1
+
+        # Tentukan status sistem
+        if sensor_1 == 0 and sensor_2 == 0 and sensor_3 == 0:
+            status = "Kebakaran"
+            alarm = "ON"
+        elif sensor_1 == 0 or sensor_2 == 0 or sensor_3 == 0:
+            status = "Bahaya"
             alarm = "ON"
         else:
             status = "Aman"
             alarm = "OFF"
 
-        # Insert ke database
+        # Insert ke database (RAW + BINARY)
         db = get_db()
         cursor = db.cursor()
 
         cursor.execute("""
-            INSERT INTO flame_data (sensor_1, sensor_2, sensor_3, status, alarm)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (sensor_1, sensor_2, sensor_3, status, alarm))
+            INSERT INTO flame_data (raw_1, raw_2, raw_3, 
+                                    sensor_1, sensor_2, sensor_3,
+                                    status, alarm)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (raw_1, raw_2, raw_3, sensor_1, sensor_2, sensor_3, status, alarm))
 
         db.commit()
         cursor.close()
@@ -56,6 +71,9 @@ def receive_sensor_data():
 
         # Broadcast realtime ke Flutter
         payload = {
+            "raw_1": raw_1,
+            "raw_2": raw_2,
+            "raw_3": raw_3,
             "sensor_1": sensor_1,
             "sensor_2": sensor_2,
             "sensor_3": sensor_3,
@@ -66,7 +84,7 @@ def receive_sensor_data():
 
         socketio.emit("flame_update", payload)
 
-        print(f"🔥 DATA DITERIMA | S1={sensor_1} S2={sensor_2} S3={sensor_3} | {status} / {alarm}")
+        print(f"🔥 DATA DITERIMA | RAW=({raw_1},{raw_2},{raw_3}) BINARY=({sensor_1},{sensor_2},{sensor_3}) | {status} / {alarm}")
         return jsonify({"status": "success", **payload}), 200
 
     except Exception as e:
@@ -84,7 +102,10 @@ def get_history():
         cursor = db.cursor(dictionary=True)
 
         cursor.execute("""
-            SELECT id, sensor_1, sensor_2, sensor_3, status, alarm, created_at
+            SELECT id, 
+                   raw_1, raw_2, raw_3,
+                   sensor_1, sensor_2, sensor_3,
+                   status, alarm, created_at
             FROM flame_data
             ORDER BY id DESC
             LIMIT 200
@@ -105,37 +126,25 @@ def get_history():
 #  KONTROL UNTUK LED / BUZZER / SENSOR (UNTUK IoT)
 # =========================================================
 
-# 🔔 Kontrol BUZZER
 @app.route('/api/control/buzzer', methods=['POST'])
 def control_buzzer():
     active = request.json.get('active')
-
     socketio.emit("control_buzzer", {"active": active})
     print(f"📢 BUZZER: {active}")
     return jsonify({"status": "sent", "active": active})
 
-
-# 💡 Kontrol LED
 @app.route('/api/control/led', methods=['POST'])
 def control_led():
     active = request.json.get('active')
-
     socketio.emit("control_led", {"active": active})
     print(f"💡 LED: {active}")
     return jsonify({"status": "sent", "active": active})
 
-
-# 🎛 Kontrol Sensor 1 / 2 / 3
 @app.route('/api/control/sensor', methods=['POST'])
 def control_sensor():
     sensor_id = request.json.get('sensor')
     active = request.json.get('active')
-
-    socketio.emit("control_sensor", {
-        "sensor": sensor_id,
-        "active": active
-    })
-
+    socketio.emit("control_sensor", {"sensor": sensor_id, "active": active})
     print(f"📡 SENSOR {sensor_id} => {active}")
     return jsonify({"status": "sent"})
 
