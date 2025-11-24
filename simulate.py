@@ -21,13 +21,13 @@ except Exception as e:
 
 
 # ======================================================
-# FUNCTION: SEND TO API + SOCKET
+# FUNCTION: SEND RAW SENSOR DATA
 # ======================================================
-def send_data(s1, s2, s3, window=None):
+def send_data(raw1, raw2, raw3, window=None):
     payload = {
-        "sensor_1": s1,
-        "sensor_2": s2,
-        "sensor_3": s3
+        "sensor_1": raw1,
+        "sensor_2": raw2,
+        "sensor_3": raw3
     }
 
     # REST API
@@ -46,11 +46,40 @@ def send_data(s1, s2, s3, window=None):
 
     # Tampilkan log di GUI
     if window:
-        window["log"].print(f"Mengirim: {payload}")
+        window["log"].print(f"Mengirim RAW: {payload}")
         window["log"].print(log)
         window["log"].print("-" * 40)
 
     return payload
+
+
+# ======================================================
+# GENERATE RAW VALUE UNTUK MODE
+# ======================================================
+def make_raw_value(mode):
+    if mode == "aman":
+        # Nilai raw normal (sensor mendeteksi tidak ada api)
+        return (
+            random.randint(400, 900),
+            random.randint(400, 900),
+            random.randint(400, 900)
+        )
+
+    if mode == "bahaya":
+        # Satu sensor mendeteksi api
+        return (
+            random.randint(0, 80),        # sensor 1 bahaya
+            random.randint(300, 900),
+            random.randint(300, 900)
+        )
+
+    if mode == "kebakaran":
+        # Semua sensor mendeteksi api
+        return (
+            random.randint(0, 60),
+            random.randint(0, 60),
+            random.randint(0, 60)
+        )
 
 
 # ======================================================
@@ -62,14 +91,8 @@ def auto_random(interval, window):
     global running
     while running:
         mode = random.choice(["aman", "bahaya", "kebakaran"])
-
-        if mode == "aman":
-            send_data(1, 1, 1, window)
-        elif mode == "bahaya":
-            send_data(0, 1, 1, window)
-        else:
-            send_data(0, 0, 0, window)
-
+        raw_vals = make_raw_value(mode)
+        send_data(*raw_vals, window)
         time.sleep(interval)
 
 
@@ -77,7 +100,7 @@ def auto_random(interval, window):
 # GUI DEFINITION
 # ======================================================
 layout = [
-    [sg.Text("🔥 FLAME SIMULATOR GUI", font=("Arial", 16, "bold"))],
+    [sg.Text("🔥 FLAME SIMULATOR GUI (RAW SENSOR)", font=("Arial", 16, "bold"))],
     [sg.HorizontalSeparator()],
 
     [sg.Button("Aman", size=(12, 2), button_color=("white", "green")),
@@ -108,15 +131,15 @@ while True:
         running = False
         break
 
-    # Manual control buttons
+    # Manual mode buttons
     if event == "Aman":
-        send_data(1, 1, 1, window)
+        send_data(*make_raw_value("aman"), window)
 
     elif event == "Bahaya":
-        send_data(0, 1, 1, window)
+        send_data(*make_raw_value("bahaya"), window)
 
     elif event == "Kebakaran":
-        send_data(0, 0, 0, window)
+        send_data(*make_raw_value("kebakaran"), window)
 
     # Auto-random ON
     if values["auto"] and not running:

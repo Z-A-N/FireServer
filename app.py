@@ -102,14 +102,14 @@ def get_history():
         cursor = db.cursor(dictionary=True)
 
         cursor.execute("""
-            SELECT id, 
-                   raw_1, raw_2, raw_3,
-                   sensor_1, sensor_2, sensor_3,
-                   status, alarm, created_at
-            FROM flame_data
-            ORDER BY id DESC
-            LIMIT 200
-        """)
+    SELECT id, raw_1, raw_2, raw_3,
+           sensor_1, sensor_2, sensor_3,
+           status, alarm,
+           DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
+    FROM flame_data
+    ORDER BY id DESC
+    LIMIT 200
+""")
 
         data = cursor.fetchall()
         cursor.close()
@@ -163,3 +163,4 @@ def on_connect():
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
     socketio.run(app, host='0.0.0.0', port=port)
+
