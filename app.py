@@ -1,65 +1,165 @@
-import eventlet
-eventlet.monkey_patch()
-
 from flask import Flask, request, jsonify
-from flask_socketio import SocketIO
-from db import get_db, init_tables
-from datetime import datetime
+from flask_socketio import SocketIO, emit
+from flask_cors import CORS
+from db import get_db
+import os
+import datetime
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
+CORS(app)
 
-# Init table MySQL
-init_tables()
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode="eventlet"
+)
 
-def save_to_db(data):
-    db = get_db()
-    cur = db.cursor()
-    cur.execute("""
-        INSERT INTO fire_history (status, sensor1, sensor2, sensor3, alarm)
-        VALUES (%s, %s, %s, %s, %s)
-    """, (
-        data["state"],
-        data["sensor1"],
-        data["sensor2"],
-        data["sensor3"],
-        "ON" if data["state"] != "AMAN" else "OFF"
-    ))
-    db.commit()
-    db.close()
-
-@app.route("/")
+# =========================================================
+#  ROUTE UTAMA
+# =========================================================
+@app.route('/')
 def home():
-    return {"msg": "FireServer OK"}
+    return "🔥 FireServer aktif & siap menerima data IoT."
 
-@app.route("/api/iot/fire", methods=["POST"])
-def fire_update():
-    data = request.get_json()
-    save_to_db(data)
 
-    socketio.emit("flame_update", {
-        "status": data["state"].capitalize(),
-        "sensor_1": data["sensor1"],
-        "sensor_2": data["sensor2"],
-        "sensor_3": data["sensor3"],
-        "first_triggered": data["first_triggered"],
-        "active_sensors": data["active_sensors"]
-    })
+# =========================================================
+#  ENDPOINT RECEIVER DATA SENSOR IoT
+# =========================================================
+@app.route('/api/sensor', methods=['POST'])
+def receive_sensor_data():
+    try:
+        data = request.get_json()
 
-    return {"status": "OK"}, 200
+        # RAW sensor values (ADC)
+        raw_1 = int(data.get('sensor_1', 1))
+        raw_2 = int(data.get('sensor_2', 1))
+        raw_3 = int(data.get('sensor_3', 1))
 
-@app.route("/api/history")
-def history():
-    db = get_db()
-    cur = db.cursor()
-    cur.execute("SELECT * FROM fire_history ORDER BY id DESC LIMIT 300")
-    rows = cur.fetchall()
-    db.close()
-    return jsonify({"data": rows})
+        # Threshold konversi RAW → BINARY
+        # Sesuaikan dengan karakteristik sensor IR kamu
+        TH = 100
 
-@socketio.on("connect")
-def connected():
-    print("Flutter Connected")
+        sensor_1 = 0 if raw_1 <= TH else 1
+        sensor_2 = 0 if raw_2 <= TH else 1
+        sensor_3 = 0 if raw_3 <= TH else 1
 
-if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000)
+        # Tentukan status sistem
+        if sensor_1 == 0 and sensor_2 == 0 and sensor_3 == 0:
+            status = "Kebakaran"
+            alarm = "ON"
+        elif sensor_1 == 0 or sensor_2 == 0 or sensor_3 == 0:
+            status = "Bahaya"
+            alarm = "ON"
+        else:
+            status = "Aman"
+            alarm = "OFF"
+
+        # Insert ke database (RAW + BINARY)
+        db = get_db()
+        cursor = db.cursor()
+
+        cursor.execute("""
+            INSERT INTO flame_data (raw_1, raw_2, raw_3, 
+                                    sensor_1, sensor_2, sensor_3,
+                                    status, alarm)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (raw_1, raw_2, raw_3, sensor_1, sensor_2, sensor_3, status, alarm))
+
+        db.commit()
+        cursor.close()
+        db.close()
+
+        # Broadcast realtime ke Flutter
+        payload = {
+            "raw_1": raw_1,
+            "raw_2": raw_2,
+            "raw_3": raw_3,
+            "sensor_1": sensor_1,
+            "sensor_2": sensor_2,
+            "sensor_3": sensor_3,
+            "status": status,
+            "alarm": alarm,
+            "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        socketio.emit("flame_update", payload)
+
+        print(f"🔥 DATA DITERIMA | RAW=({raw_1},{raw_2},{raw_3}) BINARY=({sensor_1},{sensor_2},{sensor_3}) | {status} / {alarm}")
+        return jsonify({"status": "success", **payload}), 200
+
+    except Exception as e:
+        print("❌ ERROR:", e)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# =========================================================
+#  ENDPOINT HISTORY
+# =========================================================
+@app.route('/api/history', methods=['GET'])
+def get_history():
+    try:
+        db = get_db()
+        cursor = db.cursor(dictionary=True)
+
+        cursor.execute("""
+            SELECT id, 
+                   raw_1, raw_2, raw_3,
+                   sensor_1, sensor_2, sensor_3,
+                   status, alarm, created_at
+            FROM flame_data
+            ORDER BY id DESC
+            LIMIT 200
+        """)
+
+        data = cursor.fetchall()
+        cursor.close()
+        db.close()
+
+        return jsonify({"status": "success", "data": data})
+
+    except Exception as e:
+        print("❌ History error:", e)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# =========================================================
+#  KONTROL UNTUK LED / BUZZER / SENSOR (UNTUK IoT)
+# =========================================================
+
+@app.route('/api/control/buzzer', methods=['POST'])
+def control_buzzer():
+    active = request.json.get('active')
+    socketio.emit("control_buzzer", {"active": active})
+    print(f"📢 BUZZER: {active}")
+    return jsonify({"status": "sent", "active": active})
+
+@app.route('/api/control/led', methods=['POST'])
+def control_led():
+    active = request.json.get('active')
+    socketio.emit("control_led", {"active": active})
+    print(f"💡 LED: {active}")
+    return jsonify({"status": "sent", "active": active})
+
+@app.route('/api/control/sensor', methods=['POST'])
+def control_sensor():
+    sensor_id = request.json.get('sensor')
+    active = request.json.get('active')
+    socketio.emit("control_sensor", {"sensor": sensor_id, "active": active})
+    print(f"📡 SENSOR {sensor_id} => {active}")
+    return jsonify({"status": "sent"})
+
+
+# =========================================================
+# EVENT SOCKET.IO
+# =========================================================
+@socketio.on('connect')
+def on_connect():
+    print("📡 Client Flutter/IoT Connected")
+
+
+# =========================================================
+# RUN SERVER
+# =========================================================
+if __name__ == '__main__':
+    port = int(os.getenv("PORT", 5000))
+    socketio.run(app, host='0.0.0.0', port=port)
