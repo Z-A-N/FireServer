@@ -1,2 +1,7 @@
 flask
 gunicorn
+flask-socketio
+flask_sqlalchemy
+flask_cors
+eventlet
+pymysql
