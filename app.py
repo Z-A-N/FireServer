@@ -39,40 +39,40 @@ def index():
 
 
 # ==========================================================
-# IOT -> SERVER : KIRIM DATA SENSOR
+# IOT -> SERVER : KIRIM DATA SENSOR (VERSI FIX)
 # ==========================================================
 @app.route("/api/sensor", methods=["POST"])
 def api_sensor():
-    """
-    Body JSON yang diharapkan dari IoT:
-    {
-      "sensor_1": 0/1,
-      "sensor_2": 0/1,
-      "sensor_3": 0/1,
-      "status": "Aman" | "Bahaya" | "Kebakaran",
-      "alarm": "ON" | "OFF",
-      "raw_1": int (opsional),
-      "raw_2": int (opsional),
-      "raw_3": int (opsional)
-    }
-    """
-    data = request.get_json(silent=True) or {}
+    import json
+
+    # ==== FIX 1 — baca body mentah karena get_json() gagal pada ESP8266 ====
+    raw = request.data.decode("utf-8")
+
+    if not raw:
+        return jsonify({"success": False, "error": "empty body"}), 400
+
+    try:
+        data = json.loads(raw)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"invalid json: {str(e)}"}), 400
+
+    # ==== FIX 2 — parsing value aman ====
     try:
         sensor_1 = int(data.get("sensor_1", 1))
         sensor_2 = int(data.get("sensor_2", 1))
         sensor_3 = int(data.get("sensor_3", 1))
 
         status = data.get("status", "Aman")
-        alarm = data.get("alarm", "OFF")
+        alarm  = data.get("alarm", "OFF")
 
-        raw_1 = int(data.get("raw_1", 0) or 0)
-        raw_2 = int(data.get("raw_2", 0) or 0)
-        raw_3 = int(data.get("raw_3", 0) or 0)
+        raw_1 = int(data.get("raw_1", 0))
+        raw_2 = int(data.get("raw_2", 0))
+        raw_3 = int(data.get("raw_3", 0))
 
-    except (ValueError, TypeError):
-        return jsonify({"success": False, "error": "invalid payload"}), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": f"invalid payload: {str(e)}"}), 400
 
-    # simpan ke database
+    # ==== SIMPAN KE DB ====
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
@@ -87,7 +87,7 @@ def api_sensor():
     cur.close()
     conn.close()
 
-    # kirim realtime ke Flutter
+    # ==== KIRIM REALTIME ====
     payload = {
         "sensor_1": sensor_1,
         "sensor_2": sensor_2,
@@ -98,6 +98,7 @@ def api_sensor():
     socketio.emit("flame_update", payload, broadcast=True)
 
     return jsonify({"success": True}), 200
+
 
 
 # ==========================================================
