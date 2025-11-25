@@ -1,2 +1,6 @@
 flask
 gunicorn
+flask-socketio
+eventlet
+pymysql
+python-dotenv
