@@ -18,13 +18,12 @@ CORS(app)
 db_url = os.getenv("MYSQL_URL")
 
 if not db_url:
-    raise Exception("MYSQL_URL environment variable is missing!")
+    raise Exception("MYSQL_URL NOT SET IN RAILWAY")
 
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
-
 
 # ---- SOCKET.IO (dipakai Flutter) ----
 socketio = SocketIO(app, cors_allowed_origins="*")
