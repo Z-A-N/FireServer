@@ -13,20 +13,18 @@ app = Flask(__name__)
 CORS(app)
 
 # ======================================================
-#  DATABASE CONFIG (MYSQL RAILWAY)
+#  DATABASE CONFIG (MySQL Railway)
 # ======================================================
-MYSQLUSER = os.getenv("MYSQLUSER")
-MYSQLPASSWORD = os.getenv("MYSQLPASSWORD")
-MYSQLHOST = os.getenv("MYSQLHOST")
-MYSQLPORT = os.getenv("MYSQLPORT")
-MYSQLDATABASE = os.getenv("MYSQLDATABASE")
+db_url = os.getenv("MYSQL_URL")
 
-db_url = f"mysql+pymysql://{MYSQLUSER}:{MYSQLPASSWORD}@{MYSQLHOST}:{MYSQLPORT}/{MYSQLDATABASE}"
+if not db_url:
+    raise Exception("MYSQL_URL environment variable is missing!")
 
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
+
 
 # ---- SOCKET.IO (dipakai Flutter) ----
 socketio = SocketIO(app, cors_allowed_origins="*")
