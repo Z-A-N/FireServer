@@ -1,15 +1,15 @@
 import eventlet
-eventlet.monkey_patch()     # WAJIB PALING ATAS!!!
+eventlet.monkey_patch()    # WAJIB PALING ATAS!!
 
-from flask import Flask, jsonify, request
-from flask_socketio import SocketIO, emit
+from flask import Flask, request, jsonify
+from flask_socketio import SocketIO
 from db import get_db, init_tables
 from datetime import datetime
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# -------- Init DB --------
+# Init table MySQL
 init_tables()
 
 def save_to_db(data):
@@ -30,12 +30,14 @@ def save_to_db(data):
     db.commit()
     db.close()
 
+
 @app.route("/")
 def home():
     return {"msg": "FireServer OK"}
 
+
 @app.route("/api/iot/fire", methods=["POST"])
-def fire_data():
+def fire_update():
     data = request.get_json()
 
     save_to_db(data)
@@ -51,6 +53,7 @@ def fire_data():
 
     return {"status": "OK"}, 200
 
+
 @app.route("/api/history")
 def history():
     db = get_db()
@@ -60,9 +63,11 @@ def history():
     db.close()
     return jsonify({"data": rows})
 
+
 @socketio.on("connect")
 def connected():
-    print("Flutter connected")
+    print("Flutter Connected")
+
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
