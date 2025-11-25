@@ -4,3 +4,4 @@ flask-socketio
 eventlet
 pymysql
 python-dotenv
+cryptography
