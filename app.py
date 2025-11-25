@@ -6,30 +6,46 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from flask_socketio import SocketIO
 
+
 # ======================================================
-#  FLASK APP + SOCKETIO + DB
+#  MYSQL CONFIG (MANUAL, RECOMMENDED)
+# ======================================================
+MYSQL_HOST = os.getenv("MYSQLHOST") or os.getenv("MYSQL_HOST")
+MYSQL_PORT = os.getenv("MYSQLPORT") or os.getenv("MYSQL_PORT")
+MYSQL_USER = os.getenv("MYSQLUSER") or os.getenv("MYSQL_USER")
+MYSQL_PASSWORD = os.getenv("MYSQLPASSWORD") or os.getenv("MYSQL_PASSWORD")
+MYSQL_DB = os.getenv("MYSQLDATABASE") or os.getenv("MYSQL_DB")
+
+# Validate
+missing = [k for k, v in {
+    "MYSQLHOST": MYSQL_HOST,
+    "MYSQLPORT": MYSQL_PORT,
+    "MYSQLUSER": MYSQL_USER,
+    "MYSQLPASSWORD": MYSQL_PASSWORD,
+    "MYSQLDATABASE": MYSQL_DB
+}.items() if not v]
+
+if missing:
+    raise Exception("Missing ENV vars: " + ", ".join(missing))
+
+# Build SQLAlchemy URL
+DB_URL = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}"
+
+
+# ======================================================
+#  INIT APP
 # ======================================================
 app = Flask(__name__)
-CORS(app)
-
-# ======================================================
-#  DATABASE CONFIG (MySQL Railway)
-# ======================================================
-db_url = os.getenv("MYSQL_URL")
-
-if not db_url:
-    raise Exception("MYSQL_URL NOT SET IN RAILWAY")
-
-app.config["SQLALCHEMY_DATABASE_URI"] = db_url
+app.config["SQLALCHEMY_DATABASE_URI"] = DB_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
-
-# ---- SOCKET.IO (dipakai Flutter) ----
+CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+
 # ======================================================
-#  MODEL HISTORY (1 device saja)
+#  HISTORY MODEL
 # ======================================================
 class History(db.Model):
     __tablename__ = "history"
@@ -37,10 +53,10 @@ class History(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    status = db.Column(db.String(20), nullable=False)  # "Aman", "Bahaya", "Kebakaran"
-    alarm = db.Column(db.String(5), nullable=False)    # "ON" / "OFF"
+    status = db.Column(db.String(20), nullable=False)
+    alarm = db.Column(db.String(5), nullable=False)
 
-    sensor_1 = db.Column(db.Integer, nullable=False)   # 0 = api, 1 = aman
+    sensor_1 = db.Column(db.Integer, nullable=False)
     sensor_2 = db.Column(db.Integer, nullable=False)
     sensor_3 = db.Column(db.Integer, nullable=False)
 
@@ -56,173 +72,133 @@ class History(db.Model):
         }
 
 
+# Auto create tables
 with app.app_context():
     db.create_all()
 
+
 # ======================================================
-#  STATE GLOBAL (1 DEVICE)
+#  GLOBAL STATE (1 device)
 # ======================================================
-current_state = {
+device_state = {
     "sensor_1": 1,
     "sensor_2": 1,
     "sensor_3": 1,
     "status": "Aman",
 }
-alarm_state = False                    # dikontrol dari /api/control/buzzer
-sensors_enabled = {1: True, 2: True, 3: True}  # dipakai kalau nanti mau
+alarm_state = False
 
 
 def build_payload():
-    """Payload yang DIHARAPKAN Flutter pada event 'flame_update'."""
     return {
-        "sensor_1": current_state["sensor_1"],
-        "sensor_2": current_state["sensor_2"],
-        "sensor_3": current_state["sensor_3"],
-        "status": current_state["status"],
-        "alarm": "ON" if alarm_state else "OFF",
+        "sensor_1": device_state["sensor_1"],
+        "sensor_2": device_state["sensor_2"],
+        "sensor_3": device_state["sensor_3"],
+        "status": device_state["status"],
+        "alarm": "ON" if alarm_state else "OFF"
     }
 
 
 # ======================================================
-#  ROUTE UTAMA / HEALTHCHECK
+#  ROUTES
 # ======================================================
 @app.route("/")
 def home():
-    return jsonify({"message": "FlameGuard API OK"})
+    return jsonify({"msg": "FlameGuard Backend Running"})
 
 
 # ======================================================
-#  ENDPOINT: IoT kirim data sensor
-#  URL: POST /api/iot/fire
+#  IOT SEND DATA
 # ======================================================
 @app.route("/api/iot/fire", methods=["POST"])
 def iot_fire():
-    global current_state
+    global device_state
 
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(force=True)
 
-    # ---- Ambil data dari NodeMCU ----
-    raw_state = str(data.get("state", "AMAN")).upper()
+    raw = str(data.get("state", "AMAN")).upper()
     s1 = int(data.get("sensor1", 1))
     s2 = int(data.get("sensor2", 1))
     s3 = int(data.get("sensor3", 1))
 
-    # ---- Mapping state IoT -> status untuk Flutter / History ----
-    if raw_state == "AMAN":
+    if raw == "AMAN":
         status = "Aman"
-    elif raw_state in ["BAHAYA", "PERINGATAN"]:
+    elif raw in ["BAHAYA", "PERINGATAN"]:
         status = "Bahaya"
-    elif raw_state == "KEBAKARAN":
-        status = "Kebakaran"
     else:
-        status = raw_state  # fallback
+        status = "Kebakaran"
 
-    # ---- Update state global ----
-    current_state["sensor_1"] = s1
-    current_state["sensor_2"] = s2
-    current_state["sensor_3"] = s3
-    current_state["status"] = status
+    device_state.update({
+        "sensor_1": s1,
+        "sensor_2": s2,
+        "sensor_3": s3,
+        "status": status
+    })
 
-    # ---- Simpan ke History ----
-    history_row = History(
+    row = History(
         status=status,
         alarm="ON" if alarm_state else "OFF",
-        sensor_1=s1,
-        sensor_2=s2,
-        sensor_3=s3,
+        sensor_1=s1, sensor_2=s2, sensor_3=s3
     )
-    db.session.add(history_row)
+    db.session.add(row)
     db.session.commit()
 
-    # ---- Broadcast ke semua client Flutter via Socket.IO ----
-    payload = build_payload()
-    socketio.emit("flame_update", payload, broadcast=True)
+    socketio.emit("flame_update", build_payload(), broadcast=True)
 
-    return jsonify({"status": "ok", "payload": payload})
+    return jsonify({"ok": True})
 
 
 # ======================================================
-#  ENDPOINT: GET HISTORY (untuk HistoryPage)
-#  URL: GET /api/history
+#  GET HISTORY (Flutter uses)
 # ======================================================
 @app.route("/api/history", methods=["GET"])
 def get_history():
-    limit = int(request.args.get("limit", 200))
-    logs = History.query.order_by(History.created_at.desc()).limit(limit).all()
-    data = [h.to_dict() for h in logs]
-    return jsonify({"data": data})
+    logs = History.query.order_by(History.created_at.desc()).limit(200).all()
+    return jsonify({"data": [r.to_dict() for r in logs]})
 
 
 # ======================================================
-#  ENDPOINT: CONTROL BUZZER (Alarm)
-#  URL: POST /api/control/buzzer {active: bool}
+#  CONTROL: BUZZER
 # ======================================================
 @app.route("/api/control/buzzer", methods=["POST"])
 def control_buzzer():
     global alarm_state
 
-    data = request.get_json(silent=True) or {}
-    active = bool(data.get("active", False))
+    data = request.get_json(force=True)
+    alarm_state = bool(data.get("active", False))
 
-    alarm_state = active
-
-    # Kirim update terbaru ke Flutter
-    payload = build_payload()
-    socketio.emit("flame_update", payload, broadcast=True)
-
-    return jsonify({"status": "ok", "alarm": "ON" if alarm_state else "OFF"})
+    socketio.emit("flame_update", build_payload(), broadcast=True)
+    return jsonify({"ok": True})
 
 
 # ======================================================
-#  ENDPOINT: CONTROL LED
-#  URL: POST /api/control/led {active: bool}
-#  (Sekarang hanya ACK, nanti bisa diteruskan ke IoT)
+#  CONTROL: LED
 # ======================================================
 @app.route("/api/control/led", methods=["POST"])
 def control_led():
-    # Sekarang belum diteruskan ke IoT, hanya return sukses.
-    return jsonify({"status": "ok"})
+    return jsonify({"ok": True})
 
 
 # ======================================================
-#  ENDPOINT: CONTROL SENSOR (enable/disable)
-#  URL: POST /api/control/sensor {sensor: 1..3, active: bool}
+#  CONTROL: SENSOR
 # ======================================================
 @app.route("/api/control/sensor", methods=["POST"])
 def control_sensor():
-    global sensors_enabled
-
-    data = request.get_json(silent=True) or {}
-    sensor_id = int(data.get("sensor", 0))
-    active = bool(data.get("active", True))
-
-    if sensor_id not in [1, 2, 3]:
-        return jsonify({"error": "invalid sensor id"}), 400
-
-    sensors_enabled[sensor_id] = active
-
-    return jsonify({"status": "ok", "sensor": sensor_id, "active": active})
+    return jsonify({"ok": True})
 
 
 # ======================================================
-#  SOCKET.IO EVENT (optional log)
+#  SOCKET.IO HANDLERS
 # ======================================================
 @socketio.on("connect")
-def handle_connect():
-    # Kirim state terakhir saat Flutter baru connect
+def on_connect():
     socketio.emit("flame_update", build_payload())
-    print("Client connected")
-
-
-@socketio.on("disconnect")
-def handle_disconnect():
-    print("Client disconnected")
+    print("Flutter connected!")
 
 
 # ======================================================
-#  ENTRY POINT
+#  RUN SERVER
 # ======================================================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    # eventlet dipakai oleh Flask-SocketIO untuk WebSocket
     socketio.run(app, host="0.0.0.0", port=port)
