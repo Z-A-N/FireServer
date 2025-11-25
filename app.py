@@ -1,5 +1,5 @@
 import eventlet
-eventlet.monkey_patch()    # WAJIB PALING ATAS!!
+eventlet.monkey_patch()
 
 from flask import Flask, request, jsonify
 from flask_socketio import SocketIO
@@ -15,7 +15,6 @@ init_tables()
 def save_to_db(data):
     db = get_db()
     cur = db.cursor()
-
     cur.execute("""
         INSERT INTO fire_history (status, sensor1, sensor2, sensor3, alarm)
         VALUES (%s, %s, %s, %s, %s)
@@ -26,20 +25,16 @@ def save_to_db(data):
         data["sensor3"],
         "ON" if data["state"] != "AMAN" else "OFF"
     ))
-
     db.commit()
     db.close()
-
 
 @app.route("/")
 def home():
     return {"msg": "FireServer OK"}
 
-
 @app.route("/api/iot/fire", methods=["POST"])
 def fire_update():
     data = request.get_json()
-
     save_to_db(data)
 
     socketio.emit("flame_update", {
@@ -53,7 +48,6 @@ def fire_update():
 
     return {"status": "OK"}, 200
 
-
 @app.route("/api/history")
 def history():
     db = get_db()
@@ -63,11 +57,9 @@ def history():
     db.close()
     return jsonify({"data": rows})
 
-
 @socketio.on("connect")
 def connected():
     print("Flutter Connected")
-
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
