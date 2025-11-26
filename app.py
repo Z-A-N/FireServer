@@ -43,26 +43,21 @@ def receive_sensor_data():
     try:
         data = request.get_json(force=True)
 
-        # device_id dari IoT (optional, untuk masa depan multi-device)
         device_id = data.get("device_id", "default")
 
-        # dari IoT: 0 = api terdeteksi, 1 = aman
         sensor_1 = int(data.get('sensor_1', 1))
         sensor_2 = int(data.get('sensor_2', 1))
         sensor_3 = int(data.get('sensor_3', 1))
 
-        # Untuk kompatibel dengan kolom raw_1/raw_2/raw_3 di DB
         raw_1 = sensor_1
         raw_2 = sensor_2
         raw_3 = sensor_3
 
-        # IoT sudah kirim "state" yang lebih pintar (pakai waktu 90 detik, dll)
         iot_state = data.get("state")
 
         if iot_state in ("Aman", "Bahaya", "Peringatan", "Kebakaran"):
             status = iot_state
         else:
-            # fallback kalau IoT belum kirim "state"
             triggered = [sensor_1, sensor_2, sensor_3].count(0)
             if triggered == 0:
                 status = "Aman"
@@ -73,30 +68,12 @@ def receive_sensor_data():
             else:
                 status = "Kebakaran"
 
-        # logika alarm sederhana: selain "Aman" → ON
-        if status in ("Peringatan", "Kebakaran"):
+        # ⚠ NOTE: ini logika alarmmu sekarang (aku komentari di bawah)
+        if status in ("Bahaya", "Peringatan", "Kebakaran"):
             alarm = "ON"
         else:
             alarm = "OFF"
 
-        # Insert ke database (RAW + BINARY)
-        db = get_db()
-        cursor = db.cursor()
-
-        cursor.execute("""
-            INSERT INTO flame_data (raw_1, raw_2, raw_3, 
-                                    sensor_1, sensor_2, sensor_3,
-                                    status, alarm)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (raw_1, raw_2, raw_3,
-              sensor_1, sensor_2, sensor_3,
-              status, alarm))
-
-        db.commit()
-        cursor.close()
-        db.close()
-
-        # Payload buat Flutter (Socket.IO)
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         payload = {
@@ -107,13 +84,20 @@ def receive_sensor_data():
             "status": status,
             "alarm": alarm,
             "time": now_str,
-            # info tambahan dari IoT kalau mau dipakai di UI nanti
             "active_sensors": data.get("active_sensors"),
             "first_triggered": data.get("first_triggered"),
         }
 
-        # Broadcast realtime ke Flutter
+        # 1) LANGSUNG broadcast ke Flutter
         socketio.emit("flame_update", payload)
+
+        # 2) Simpan ke DB di background (tidak menghambat response)
+        socketio.start_background_task(
+            save_flame_to_db, # type: ignore
+            raw_1, raw_2, raw_3,
+            sensor_1, sensor_2, sensor_3,
+            status, alarm
+        )
 
         print(
             f"🔥 DATA DITERIMA | "
@@ -121,7 +105,6 @@ def receive_sensor_data():
             f"{status} / {alarm}"
         )
 
-        # Balasan ke IoT: status + command terbaru
         response = {
             "status": "success",
             **payload,
@@ -137,6 +120,7 @@ def receive_sensor_data():
     except Exception as e:
         print("❌ ERROR /api/sensor:", e)
         return jsonify({"status": "error", "message": str(e)}), 500
+
 
 
 # =========================================================
